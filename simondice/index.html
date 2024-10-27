@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simón Dice con Micro:bit</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin-top: 50px;
+        }
+        #status {
+            font-size: 24px;
+            margin-top: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            margin-top: 20px;
+        }
+        #container {
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            margin-top: 20px;
+        }
+        canvas {
+            border: 2px solid #000;
+            margin-right: 20px;
+        }
+        #gui {
+            font-size: 18px;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+    <h1>Simón Dice con Micro:bit</h1>
+    <button id="connectButton">Conectar</button>
+    <div id="status">Esperando datos...</div>
+
+    <div id="container">
+        <canvas id="gameCanvas" width="400" height="400"></canvas>
+        <div id="gui">
+            <p><strong>Teclas y Colores:</strong></p>
+            <p>W = <span style="color: red;">Rojo</span></p>
+            <p>S = <span style="color: green;">Verde</span></p>
+            <p>A = <span style="color: blue;">Azul</span></p>
+            <p>D = <span style="color: yellow;">Amarillo</span></p>
+        </div>
+    </div>
+
+    <div id="jugador">Secuencia del Jugador: </div>
+    <div id="cpu">Secuencia de la CPU: </div>
+    <div id="juego">Estado del Juego</div>
+
+    <script>
+        let port;
+        const statusDiv = document.getElementById('status');
+        const estadoJugador = document.getElementById('jugador');
+        const estadoCPU = document.getElementById('cpu');
+        const estadoJuego = document.getElementById('juego');
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        let secuenciaCPU = [];
+        let secuenciaJugador = [];
+        let secuenciaActual = 0;
+        let colores = ['green', 'red', 'blue', 'yellow']; // Colores para cada botón
+
+        document.getElementById('connectButton').addEventListener('click', async () => {
+            if (!("serial" in navigator)) {
+                statusDiv.innerText = "La API de Serial no está soportada en este navegador.";
+                return;
+            }
+            try {
+                port = await navigator.serial.requestPort();
+                await port.open({ baudRate: 115200 });
+                statusDiv.innerText = "Conectado al Micro:bit. Esperando datos...";
+
+                // Enviar automáticamente la letra "d"
+                await sendData('d');
+
+                const decoder = new TextDecoderStream();
+                port.readable.pipeTo(decoder.writable);
+                const reader = decoder.readable.getReader();
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) {
+                        break;
+                    }
+                    handleReceivedData(value.trim());
+                }
+            } catch (error) {
+                statusDiv.innerText = `Error al conectar: ${error}`;
+            }
+        });
+
+
+        // Función para enviar datos al micro:bit
+        async function sendData(data) {
+            if (port && port.writable) {
+                const writer = port.writable.getWriter();
+                const encoder = new TextEncoder();
+                const byteData = encoder.encode(data + '\n'); // Enviamos el dato con un salto de línea
+                await writer.write(byteData);
+                writer.releaseLock();
+            } else {
+                console.error('Puerto no disponible');
+            }
+        }
+
+        // Función para manejar los datos recibidos del Micro:bit
+        function handleReceivedData(buttonNumber) {
+            juego(buttonNumber);
+        }
+
+        // Mostrar la secuencia de la CPU en el canvas
+        async function mostrarSecuencia() {
+            for (let i = 0; i < secuenciaCPU.length; i++) {
+                let color = colores[secuenciaCPU[i] - 1]; // 1 a 4 se mapean a 0 a 3
+                dibujarCuadro(color);
+                await delay(800);
+                limpiarCanvas();
+                await delay(400);
+            }
+        }
+
+        // Dibujar un cuadro en el canvas
+        function dibujarCuadro(color) {
+            ctx.fillStyle = color;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        // Limpiar el canvas
+        function limpiarCanvas() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+
+        // Agregar un valor a la secuencia de la CPU (número aleatorio entre 1 y 4)
+        function agregarValorCPU() {
+            const numeroAleatorio = Math.floor(Math.random() * 4) + 1;
+            secuenciaCPU.push(numeroAleatorio);
+            estadoCPU.innerText = "Secuencia CPU: " + secuenciaCPU.join(' ');
+        }
+
+        // Iniciar el juego
+        function comenzarJuego() {
+            secuenciaCPU = [];
+            secuenciaJugador = [];
+            secuenciaActual = 0;
+            agregarValorCPU(); // Agregar un valor antes de mostrar la secuencia
+            mostrarSecuencia(); // Mostrar la secuencia
+        }
+
+        // Función para controlar la secuencia de juego
+        async function juego(buttonNumber) {
+            secuenciaJugador.push(parseInt(buttonNumber));
+            estadoJugador.innerText = "Secuencia Jugador: " + secuenciaJugador.join(' ');
+
+            // Mostrar el color correspondiente al botón presionado por el jugador
+            let colorJugador = colores[buttonNumber - 1];
+            dibujarCuadro(colorJugador);
+            await delay(800);
+            limpiarCanvas();
+
+            if (secuenciaJugador[secuenciaActual] === secuenciaCPU[secuenciaActual]) {
+                if (secuenciaActual === secuenciaCPU.length - 1) {
+                    estadoJuego.innerText = "Correcto! La secuencia se alarga.";
+                    secuenciaJugador = [];
+                    secuenciaActual = 0;
+                    agregarValorCPU();
+                    setTimeout(mostrarSecuencia, 1000); // Mostrar la nueva secuencia
+                } else {
+                    secuenciaActual++;
+                }
+            } else {
+                estadoJuego.innerText = "¡Perdiste! Reiniciando el juego.";
+                estadoJugador.innerText = "Secuencia Jugador: ";
+                setTimeout(comenzarJuego, 2000); // Reiniciar el juego
+            }
+        }
+
+        // Función delay para pausar entre colores
+        function delay(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        // Manejo de las teclas W, S, A y D para simular los botones
+        document.addEventListener('keydown', (event) => {
+            const key = event.key.toLowerCase();
+            switch (key) {
+                case 'w': // Rojo
+                    juego(2); // Asignado al color rojo
+                    break;
+                case 's': // Verde
+                    juego(1); // Asignado al color verde
+                    break;
+                case 'a': // Azul
+                    juego(3); // Asignado al color azul
+                    break;
+                case 'd': // Amarillo
+                    juego(4); // Asignado al color amarillo
+                    break;
+                default:
+                    break;
+            }
+        });
+
+        // Comenzar el juego automáticamente
+        comenzarJuego();
+    </script>
+
+</body>
+</html>
